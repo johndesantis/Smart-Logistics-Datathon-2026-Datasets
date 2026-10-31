@@ -48,6 +48,23 @@ def _resolve_data_dirs(year):
 
 CAPTAIN_DIRS = []
 POSITION_DIRS = []
+
+# Add directories from /home/haha/Downloads if they exist
+ADDITIONAL_PATHS = [
+    # 2024
+    ("/home/haha/Downloads/3-2. AIS Data/2024 Data/captain info/2024", 
+     "/home/haha/Downloads/3-2. AIS Data/2024 Data/position info/2024"),
+    # 2025
+    ("/home/haha/Downloads/3-2. AIS Data/2025 Data/captain info 2025", 
+     "/home/haha/Downloads/3-2. AIS Data/2025 Data/position info 2025"),
+]
+
+for cd, pd in ADDITIONAL_PATHS:
+    if os.path.exists(cd):
+        CAPTAIN_DIRS.append(cd)
+    if os.path.exists(pd):
+        POSITION_DIRS.append(pd)
+
 for year in ('2024', '2025'):
     cd, pd = _resolve_data_dirs(year)
     if cd and os.path.exists(cd):
