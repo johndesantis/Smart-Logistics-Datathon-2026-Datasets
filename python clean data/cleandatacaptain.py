@@ -81,13 +81,27 @@ def mark(value):
 
 
 def safe_float(value):
-    """Safely convert a value to float, returning None for empty/None."""
+    """Safely convert a value to float, returning None for empty/None.
+    Strips [BAD] prefix if present."""
     if value is None or value == '':
         return None
+    s = str(value)
+    if s.startswith('[BAD]'):
+        s = s[5:]
     try:
-        return float(value)
+        return float(s)
     except (ValueError, TypeError):
         return None
+
+
+def strip_mark(value):
+    """Remove [BAD] prefix if present, returning the underlying value."""
+    if value is None:
+        return value
+    s = str(value)
+    if s.startswith('[BAD]'):
+        return s[5:]
+    return s
 
 
 def clean_captain_file(filepath, flagged_report_list):
@@ -95,6 +109,7 @@ def clean_captain_file(filepath, flagged_report_list):
 
     Flagged cells are prefixed with [BAD].
     All original data is preserved; only flagged values are modified.
+    Already-marked cells are recognized and included in the flagged report.
     """
     with open(filepath, 'r', newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
@@ -114,40 +129,45 @@ def clean_captain_file(filepath, flagged_report_list):
         length = safe_float(row.get('ais_capts_length'))
         width = safe_float(row.get('ais_capts_width'))
         if length is not None and width is not None and length == 0 and width == 0:
-            if 'ais_capts_length' in row and not is_marked(row['ais_capts_length']):
+            if 'ais_capts_length' in row:
+                raw_val = strip_mark(row['ais_capts_length'])
+                if not is_marked(row['ais_capts_length']):
+                    row['ais_capts_length'] = mark(row['ais_capts_length'])
                 flagged_report_list.append({
                     'file': os.path.basename(filepath),
                     'filepath': filepath,
                     'row_index': row_idx + 1,
                     'column': 'ais_capts_length',
-                    'original_value': original_row.get('ais_capts_length', ''),
-                    'flagged_value': mark(row['ais_capts_length']),
+                    'original_value': raw_val,
+                    'flagged_value': row['ais_capts_length'],
                     'reason': 'ais_capts_length == 0 AND ais_capts_width == 0'
                 })
-                row['ais_capts_length'] = mark(row['ais_capts_length'])
                 flagged_cells += 1
-            if 'ais_capts_width' in row and not is_marked(row['ais_capts_width']):
+            if 'ais_capts_width' in row:
+                raw_val = strip_mark(row['ais_capts_width'])
+                if not is_marked(row['ais_capts_width']):
+                    row['ais_capts_width'] = mark(row['ais_capts_width'])
                 flagged_report_list.append({
                     'file': os.path.basename(filepath),
                     'filepath': filepath,
                     'row_index': row_idx + 1,
                     'column': 'ais_capts_width',
-                    'original_value': original_row.get('ais_capts_width', ''),
-                    'flagged_value': mark(row['ais_capts_width']),
+                    'original_value': raw_val,
+                    'flagged_value': row['ais_capts_width'],
                     'reason': 'ais_capts_length == 0 AND ais_capts_width == 0'
                 })
-                row['ais_capts_width'] = mark(row['ais_capts_width'])
                 flagged_cells += 1
 
         # Rule: callsign purely numeric
-        callsign = row.get('ais_capts_callsign') or ''
-        if callsign and CALLSIGN_NUMERIC_RE.match(callsign) and not is_marked(row.get('ais_capts_callsign')):
+        callsign_raw = row.get('ais_capts_callsign') or ''
+        callsign_val = strip_mark(callsign_raw)
+        if callsign_val and CALLSIGN_NUMERIC_RE.match(callsign_val) and not is_marked(row.get('ais_capts_callsign')):
             flagged_report_list.append({
                 'file': os.path.basename(filepath),
                 'filepath': filepath,
                 'row_index': row_idx + 1,
                 'column': 'ais_capts_callsign',
-                'original_value': original_row.get('ais_capts_callsign', ''),
+                'original_value': callsign_val,
                 'flagged_value': mark(row['ais_capts_callsign']),
                 'reason': 'ais_capts_callsign purely numeric (no letters)'
             })
@@ -157,12 +177,13 @@ def clean_captain_file(filepath, flagged_report_list):
         # Rule: imo == 0
         imo = safe_float(row.get('ais_capts_imo'))
         if imo is not None and imo == 0 and not is_marked(row.get('ais_capts_imo')):
+            raw_imo = strip_mark(row.get('ais_capts_imo'))
             flagged_report_list.append({
                 'file': os.path.basename(filepath),
                 'filepath': filepath,
                 'row_index': row_idx + 1,
                 'column': 'ais_capts_imo',
-                'original_value': original_row.get('ais_capts_imo', ''),
+                'original_value': raw_imo,
                 'flagged_value': mark(row['ais_capts_imo']),
                 'reason': 'ais_capts_imo == 0'
             })
@@ -172,12 +193,13 @@ def clean_captain_file(filepath, flagged_report_list):
         # Rule: draft <= 0 -> unacceptable
         draft = safe_float(row.get('ais_capts_draft'))
         if draft is not None and draft <= 0 and not is_marked(row.get('ais_capts_draft')):
+            raw_draft = strip_mark(row.get('ais_capts_draft'))
             flagged_report_list.append({
                 'file': os.path.basename(filepath),
                 'filepath': filepath,
                 'row_index': row_idx + 1,
                 'column': 'ais_capts_draft',
-                'original_value': original_row.get('ais_capts_draft', ''),
+                'original_value': raw_draft,
                 'flagged_value': mark(row['ais_capts_draft']),
                 'reason': 'ais_capts_draft <= 0'
             })

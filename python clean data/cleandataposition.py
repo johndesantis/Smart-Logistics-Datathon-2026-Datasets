@@ -81,13 +81,27 @@ def mark(value):
 
 
 def safe_float(value):
-    """Safely convert a value to float, returning None for empty/None."""
+    """Safely convert a value to float, returning None for empty/None.
+    Strips [BAD] prefix if present."""
     if value is None or value == '':
         return None
+    s = str(value)
+    if s.startswith('[BAD]'):
+        s = s[5:]
     try:
-        return float(value)
+        return float(s)
     except (ValueError, TypeError):
         return None
+
+
+def strip_mark(value):
+    """Remove [BAD] prefix if present, returning the underlying value."""
+    if value is None:
+        return value
+    s = str(value)
+    if s.startswith('[BAD]'):
+        return s[5:]
+    return s
 
 
 def clean_position_file(filepath, flagged_report_list):
@@ -95,6 +109,7 @@ def clean_position_file(filepath, flagged_report_list):
 
     Flagged cells are prefixed with [BAD].
     All original data is preserved; only flagged values are modified.
+    Already-marked cells are recognized and included in the flagged report.
     """
     with open(filepath, 'r', newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
@@ -110,95 +125,99 @@ def clean_position_file(filepath, flagged_report_list):
         row = {k: v for k, v in row.items() if k is not None}
         # Rule: latitude outside [-90, 90]
         lat = safe_float(row.get('ais_position_latitude'))
-        if lat is not None and (lat < -90 or lat > 90):
-            if 'ais_position_latitude' in row and not is_marked(row['ais_position_latitude']):
-                flagged_report_list.append({
-                    'file': os.path.basename(filepath),
-                    'filepath': filepath,
-                    'row_index': row_idx + 1,
-                    'column': 'ais_position_latitude',
-                    'original_value': original_row.get('ais_position_latitude', ''),
-                    'flagged_value': mark(row['ais_position_latitude']),
-                    'reason': 'latitude outside [-90, 90]'
-                })
-                row['ais_position_latitude'] = mark(row['ais_position_latitude'])
-                flagged_cells += 1
+        if lat is not None and (lat < -90 or lat > 90) and not is_marked(row.get('ais_position_latitude')):
+            raw_lat = strip_mark(row.get('ais_position_latitude'))
+            flagged_report_list.append({
+                'file': os.path.basename(filepath),
+                'filepath': filepath,
+                'row_index': row_idx + 1,
+                'column': 'ais_position_latitude',
+                'original_value': raw_lat,
+                'flagged_value': mark(row['ais_position_latitude']),
+                'reason': 'latitude outside [-90, 90]'
+            })
+            row['ais_position_latitude'] = mark(row['ais_position_latitude'])
+            flagged_cells += 1
 
         # Rule: longitude outside [-180, 180]
         lon = safe_float(row.get('ais_position_longitude'))
-        if lon is not None and (lon < -180 or lon > 180):
-            if 'ais_position_longitude' in row and not is_marked(row['ais_position_longitude']):
-                flagged_report_list.append({
-                    'file': os.path.basename(filepath),
-                    'filepath': filepath,
-                    'row_index': row_idx + 1,
-                    'column': 'ais_position_longitude',
-                    'original_value': original_row.get('ais_position_longitude', ''),
-                    'flagged_value': mark(row['ais_position_longitude']),
-                    'reason': 'longitude outside [-180, 180]'
-                })
-                row['ais_position_longitude'] = mark(row['ais_position_longitude'])
-                flagged_cells += 1
+        if lon is not None and (lon < -180 or lon > 180) and not is_marked(row.get('ais_position_longitude')):
+            raw_lon = strip_mark(row.get('ais_position_longitude'))
+            flagged_report_list.append({
+                'file': os.path.basename(filepath),
+                'filepath': filepath,
+                'row_index': row_idx + 1,
+                'column': 'ais_position_longitude',
+                'original_value': raw_lon,
+                'flagged_value': mark(row['ais_position_longitude']),
+                'reason': 'longitude outside [-180, 180]'
+            })
+            row['ais_position_longitude'] = mark(row['ais_position_longitude'])
+            flagged_cells += 1
 
         # Rule: speed < 0 and != -1 (-1 = unknown)
         speed = safe_float(row.get('ais_position_speed'))
-        if speed is not None and speed < 0 and speed != -1:
-            if 'ais_position_speed' in row and not is_marked(row['ais_position_speed']):
-                flagged_report_list.append({
-                    'file': os.path.basename(filepath),
-                    'filepath': filepath,
-                    'row_index': row_idx + 1,
-                    'column': 'ais_position_speed',
-                    'original_value': original_row.get('ais_position_speed', ''),
-                    'flagged_value': mark(row['ais_position_speed']),
-                    'reason': 'speed < 0 and != -1'
-                })
-                row['ais_position_speed'] = mark(row['ais_position_speed'])
-                flagged_cells += 1
+        if speed is not None and speed < 0 and speed != -1 and not is_marked(row.get('ais_position_speed')):
+            raw_speed = strip_mark(row.get('ais_position_speed'))
+            flagged_report_list.append({
+                'file': os.path.basename(filepath),
+                'filepath': filepath,
+                'row_index': row_idx + 1,
+                'column': 'ais_position_speed',
+                'original_value': raw_speed,
+                'flagged_value': mark(row['ais_position_speed']),
+                'reason': 'speed < 0 and != -1'
+            })
+            row['ais_position_speed'] = mark(row['ais_position_speed'])
+            flagged_cells += 1
 
         # Rule: course < 0 or course > 360, and != -1 (-1 = unknown)
         course = safe_float(row.get('ais_position_course'))
-        if course is not None and course != -1 and (course < 0 or course > 360):
-            if 'ais_position_course' in row and not is_marked(row['ais_position_course']):
-                flagged_report_list.append({
-                    'file': os.path.basename(filepath),
-                    'filepath': filepath,
-                    'row_index': row_idx + 1,
-                    'column': 'ais_position_course',
-                    'original_value': original_row.get('ais_position_course', ''),
-                    'flagged_value': mark(row['ais_position_course']),
-                    'reason': 'course < 0 or course > 360 and != -1'
-                })
-                row['ais_position_course'] = mark(row['ais_position_course'])
-                flagged_cells += 1
+        if course is not None and course != -1 and (course < 0 or course > 360) and not is_marked(row.get('ais_position_course')):
+            raw_course = strip_mark(row.get('ais_position_course'))
+            flagged_report_list.append({
+                'file': os.path.basename(filepath),
+                'filepath': filepath,
+                'row_index': row_idx + 1,
+                'column': 'ais_position_course',
+                'original_value': raw_course,
+                'flagged_value': mark(row['ais_position_course']),
+                'reason': 'course < 0 or course > 360 and != -1'
+            })
+            row['ais_position_course'] = mark(row['ais_position_course'])
+            flagged_cells += 1
 
-        # Rule: latitude == 0 AND longitude == 0 -> flag both (except only latitude = 0 is acceptable)
+        # Rule: latitude == 0 AND longitude == 0 -> flag both
         lat = safe_float(row.get('ais_position_latitude'))
         lon = safe_float(row.get('ais_position_longitude'))
         if lat is not None and lon is not None and lat == 0 and lon == 0:
-            if 'ais_position_latitude' in row and not is_marked(row['ais_position_latitude']):
+            if 'ais_position_latitude' in row:
+                raw_lat = strip_mark(row.get('ais_position_latitude'))
+                if not is_marked(row.get('ais_position_latitude')):
+                    row['ais_position_latitude'] = mark(row['ais_position_latitude'])
                 flagged_report_list.append({
                     'file': os.path.basename(filepath),
                     'filepath': filepath,
                     'row_index': row_idx + 1,
                     'column': 'ais_position_latitude',
-                    'original_value': original_row.get('ais_position_latitude', ''),
-                    'flagged_value': mark(row['ais_position_latitude']),
+                    'original_value': raw_lat,
+                    'flagged_value': row['ais_position_latitude'],
                     'reason': 'latitude == 0 AND longitude == 0'
                 })
-                row['ais_position_latitude'] = mark(row['ais_position_latitude'])
                 flagged_cells += 1
-            if 'ais_position_longitude' in row and not is_marked(row['ais_position_longitude']):
+            if 'ais_position_longitude' in row:
+                raw_lon = strip_mark(row.get('ais_position_longitude'))
+                if not is_marked(row.get('ais_position_longitude')):
+                    row['ais_position_longitude'] = mark(row['ais_position_longitude'])
                 flagged_report_list.append({
                     'file': os.path.basename(filepath),
                     'filepath': filepath,
                     'row_index': row_idx + 1,
                     'column': 'ais_position_longitude',
-                    'original_value': original_row.get('ais_position_longitude', ''),
-                    'flagged_value': mark(row['ais_position_longitude']),
+                    'original_value': raw_lon,
+                    'flagged_value': row['ais_position_longitude'],
                     'reason': 'latitude == 0 AND longitude == 0'
                 })
-                row['ais_position_longitude'] = mark(row['ais_position_longitude'])
                 flagged_cells += 1
 
         # Update row in place
