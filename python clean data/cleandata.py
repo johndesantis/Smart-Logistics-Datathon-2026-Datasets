@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Clean AIS 2025 datasets in place.
+"""Clean AIS 2024 and 2025 datasets in place.
 
 Flags (marks) disrespectancies without removing any data.
 Flagged cells are prefixed with [BAD].
@@ -29,21 +29,35 @@ import csv
 import os
 import re
 import glob
+import itertools
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 APP_ROOT = os.path.dirname(SCRIPT_DIR)
-# Try both possible directory names
-if os.path.exists(os.path.join(APP_ROOT, '2025 Data')):
-    DATA_DIR = os.path.join(APP_ROOT, '2025 Data')
-    CAPTAIN_DIR = os.path.join(DATA_DIR, 'captain info')
-    POSITION_DIR = os.path.join(DATA_DIR, 'position info')
-elif os.path.exists(os.path.join(APP_ROOT, 'AIS 2025')):
-    DATA_DIR = os.path.join(APP_ROOT, 'AIS 2025')
-    CAPTAIN_DIR = os.path.join(DATA_DIR, 'captain info')
-    POSITION_DIR = os.path.join(DATA_DIR, 'position info')
-else:
-    CAPTAIN_DIR = os.path.join(APP_ROOT, 'AIS 2025', 'captain info')
-    POSITION_DIR = os.path.join(APP_ROOT, 'AIS 2025', 'position info')
+
+def _resolve_data_dirs(year):
+    """Resolve captain/position directories for a given year."""
+    base = os.path.join(APP_ROOT, f'AIS {year}')
+    if os.path.exists(base):
+        return (os.path.join(base, 'captain info'),
+                os.path.join(base, 'position info'))
+    base = os.path.join(APP_ROOT, f'{year} Data')
+    if os.path.exists(base):
+        return (os.path.join(base, 'captain info'),
+                os.path.join(base, 'position info'))
+    return None, None
+
+CAPTAIN_DIRS = []
+POSITION_DIRS = []
+for year in ('2024', '2025'):
+    cd, pd = _resolve_data_dirs(year)
+    if cd and os.path.exists(cd):
+        CAPTAIN_DIRS.append(cd)
+    if pd and os.path.exists(pd):
+        POSITION_DIRS.append(pd)
+
+# Backwards-compatible single-directory constants (first match)
+CAPTAIN_DIR = CAPTAIN_DIRS[0] if CAPTAIN_DIRS else os.path.join(APP_ROOT, 'AIS 2025', 'captain info')
+POSITION_DIR = POSITION_DIRS[0] if POSITION_DIRS else os.path.join(APP_ROOT, 'AIS 2025', 'position info')
 
 CALLSIGN_NUMERIC_RE = re.compile(r'^[0-9]+$')
 
@@ -168,16 +182,26 @@ def main():
     total_rows = 0
     total_flagged = 0
 
-    # Captain info
-    for filepath in sorted(glob.glob(os.path.join(CAPTAIN_DIR, '*.csv'))):
+    # Collect all CSV files from all resolved captain directories
+    captain_files = sorted(itertools.chain.from_iterable(
+        glob.glob(os.path.join(d, '*.csv')) for d in CAPTAIN_DIRS
+    ))
+
+    # Captain info (all resolved directories)
+    for filepath in captain_files:
         rows, flagged = clean_captain_file(filepath)
         total_files += 1
         total_rows += rows
         total_flagged += flagged
         print(f'[CAPTAIN] {os.path.basename(filepath)}: {rows} rows, {flagged} cells flagged')
 
+    # Collect all CSV files from all resolved position directories
+    position_files = sorted(itertools.chain.from_iterable(
+        glob.glob(os.path.join(d, '*.csv')) for d in POSITION_DIRS
+    ))
+
     # Position info (skip non-CSV files like 'haha')
-    for filepath in sorted(glob.glob(os.path.join(POSITION_DIR, '*.csv'))):
+    for filepath in position_files:
         rows, flagged = clean_position_file(filepath)
         total_files += 1
         total_rows += rows
