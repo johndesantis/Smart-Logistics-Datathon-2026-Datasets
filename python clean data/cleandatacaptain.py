@@ -158,52 +158,55 @@ def clean_captain_file(filepath, flagged_report_list):
                 })
                 flagged_cells += 1
 
-        # Rule: callsign purely numeric
+        # Rule: callsign purely numeric (no letters)
         callsign_raw = row.get('ais_capts_callsign') or ''
         callsign_val = strip_mark(callsign_raw)
-        if callsign_val and CALLSIGN_NUMERIC_RE.match(callsign_val) and not is_marked(row.get('ais_capts_callsign')):
+        if callsign_val and CALLSIGN_NUMERIC_RE.match(callsign_val):
+            if not is_marked(row.get('ais_capts_callsign')):
+                row['ais_capts_callsign'] = mark(row['ais_capts_callsign'])
             flagged_report_list.append({
                 'file': os.path.basename(filepath),
                 'filepath': filepath,
                 'row_index': row_idx + 1,
                 'column': 'ais_capts_callsign',
                 'original_value': callsign_val,
-                'flagged_value': mark(row['ais_capts_callsign']),
+                'flagged_value': row['ais_capts_callsign'],
                 'reason': 'ais_capts_callsign purely numeric (no letters)'
             })
-            row['ais_capts_callsign'] = mark(row['ais_capts_callsign'])
             flagged_cells += 1
 
-        # Rule: imo == 0
+        # Rule: imo == 0 -> unacceptable
         imo = safe_float(row.get('ais_capts_imo'))
-        if imo is not None and imo == 0 and not is_marked(row.get('ais_capts_imo')):
+        if imo is not None and imo == 0:
             raw_imo = strip_mark(row.get('ais_capts_imo'))
+            if not is_marked(row.get('ais_capts_imo')):
+                row['ais_capts_imo'] = mark(row['ais_capts_imo'])
             flagged_report_list.append({
                 'file': os.path.basename(filepath),
                 'filepath': filepath,
                 'row_index': row_idx + 1,
                 'column': 'ais_capts_imo',
                 'original_value': raw_imo,
-                'flagged_value': mark(row['ais_capts_imo']),
+                'flagged_value': row['ais_capts_imo'],
                 'reason': 'ais_capts_imo == 0'
             })
-            row['ais_capts_imo'] = mark(row['ais_capts_imo'])
             flagged_cells += 1
 
         # Rule: draft <= 0 -> unacceptable
         draft = safe_float(row.get('ais_capts_draft'))
-        if draft is not None and draft <= 0 and not is_marked(row.get('ais_capts_draft')):
+        if draft is not None and draft <= 0:
             raw_draft = strip_mark(row.get('ais_capts_draft'))
+            if not is_marked(row.get('ais_capts_draft')):
+                row['ais_capts_draft'] = mark(row['ais_capts_draft'])
             flagged_report_list.append({
                 'file': os.path.basename(filepath),
                 'filepath': filepath,
                 'row_index': row_idx + 1,
                 'column': 'ais_capts_draft',
                 'original_value': raw_draft,
-                'flagged_value': mark(row['ais_capts_draft']),
+                'flagged_value': row['ais_capts_draft'],
                 'reason': 'ais_capts_draft <= 0'
             })
-            row['ais_capts_draft'] = mark(row['ais_capts_draft'])
             flagged_cells += 1
 
         # Update row in place
@@ -245,13 +248,43 @@ def main():
 
     print(f'\nTotal: {total_files} files, {total_rows} rows, {total_flagged} cells flagged')
 
-    # Write flagged cells report
+    # Aggregate flagged report by row: count unique rows and list flagged columns
+    row_map = {}  # key: (file, filepath, row_index) -> {columns: set, original_values: dict, flagged_values: dict, reasons: dict}
+    for entry in flagged_report_list:
+        key = (entry['file'], entry['filepath'], entry['row_index'])
+        if key not in row_map:
+            row_map[key] = {
+                'file': entry['file'],
+                'filepath': entry['filepath'],
+                'row_index': entry['row_index'],
+                'flagged_columns': set(),
+                'original_values': {},
+                'flagged_values': {},
+                'reasons': {},
+            }
+        row_map[key]['flagged_columns'].add(entry['column'])
+        row_map[key]['original_values'][entry['column']] = entry['original_value']
+        row_map[key]['flagged_values'][entry['column']] = entry['flagged_value']
+        row_map[key]['reasons'][entry['column']] = entry['reason']
+
+    # Write flagged rows report
     report_path = os.path.join(APP_ROOT, 'flaggedcaptaincells.csv')
     with open(report_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=['file', 'filepath', 'row_index', 'column', 'original_value', 'flagged_value', 'reason'])
-        writer.writeheader()
-        writer.writerows(flagged_report_list)
-    print(f'\nFlagged cells report written to: {report_path} ({len(flagged_report_list)} entries)')
+        writer = csv.writer(f)
+        writer.writerow(['file', 'filepath', 'row_index', 'flagged_row_count', 'flagged_columns', 'original_values', 'flagged_values', 'reasons'])
+        for key in sorted(row_map.keys()):
+            info = row_map[key]
+            writer.writerow([
+                info['file'],
+                info['filepath'],
+                info['row_index'],
+                len(info['flagged_columns']),
+                ';'.join(sorted(info['flagged_columns'])),
+                ';'.join(f'{col}={info["original_values"][col]}' for col in sorted(info['flagged_columns'])),
+                ';'.join(f'{col}={info["flagged_values"][col]}' for col in sorted(info['flagged_columns'])),
+                ';'.join(f'{col}={info["reasons"][col]}' for col in sorted(info['flagged_columns'])),
+            ])
+    print(f'\nFlagged rows report written to: {report_path} ({len(row_map)} rows flagged, {total_flagged} total cells flagged)')
 
 
 if __name__ == '__main__':

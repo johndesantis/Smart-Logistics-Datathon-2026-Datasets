@@ -1,1 +1,1 @@
-file,filepath,row_index,column,original_value,flagged_value,reason
+file,filepath,row_index,flagged_row_count,flagged_columns,original_values,flagged_values,reasons
