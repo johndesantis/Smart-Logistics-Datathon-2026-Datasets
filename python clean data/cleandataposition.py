@@ -177,46 +177,68 @@ def clean_position_file(filepath, fieldnames, report_writer, report_file):
                 row_reasons['ais_position_longitude'] = 'longitude outside [-180, 180]'
                 flagged_cells += 1
 
-        # Rule: speed < 0 and != -1 (-1 = unknown)
+        # Rule: if speed > 0.5 -> acceptable value, so speed <= 0.5 is bad (except -1 unknown?)
         speed = safe_float(row.get('ais_position_speed'))
-        if speed is not None and speed < 0 and speed != -1:
+        if speed is not None and speed != -1 and speed <= 0.5:
             if 'ais_position_speed' in row:
-                raw_speed = strip_mark(row.get('ais_position_speed'))
                 if not is_marked(row.get('ais_position_speed')):
                     row['ais_position_speed'] = mark(row['ais_position_speed'])
                 row_flagged_columns.add('ais_position_speed')
-                row_reasons['ais_position_speed'] = 'speed < 0 and != -1'
+                row_reasons['ais_position_speed'] = 'speed <= 0.5'
+                flagged_cells += 1
+        elif speed is not None and speed < 0 and speed != -1:
+            if 'ais_position_speed' in row:
+                if not is_marked(row.get('ais_position_speed')):
+                    row['ais_position_speed'] = mark(row['ais_position_speed'])
+                row_flagged_columns.add('ais_position_speed')
+                row_reasons['ais_position_speed'] = 'speed < 0'
                 flagged_cells += 1
 
-        # Rule: course < 0 or course > 360, and != -1 (-1 = unknown)
+        # Rule: if course > 0 -> acceptable value, so course <= 0 is bad (except -1 unknown?)
         course = safe_float(row.get('ais_position_course'))
-        if course is not None and course != -1 and (course < 0 or course > 360):
+        if course is not None and course != -1 and course <= 0:
             if 'ais_position_course' in row:
-                raw_course = strip_mark(row.get('ais_position_course'))
                 if not is_marked(row.get('ais_position_course')):
                     row['ais_position_course'] = mark(row['ais_position_course'])
                 row_flagged_columns.add('ais_position_course')
-                row_reasons['ais_position_course'] = 'course < 0 or course > 360 and != -1'
+                row_reasons['ais_position_course'] = 'course <= 0'
+                flagged_cells += 1
+        # Also keep existing range check for safety
+        elif course is not None and course != -1 and course > 360:
+            if 'ais_position_course' in row:
+                if not is_marked(row.get('ais_position_course')):
+                    row['ais_position_course'] = mark(row['ais_position_course'])
+                row_flagged_columns.add('ais_position_course')
+                row_reasons['ais_position_course'] = 'course > 360'
                 flagged_cells += 1
 
-        # Rule: latitude == 0 AND longitude == 0 -> flag both
+        # Rule: latitude and longitude equal to 0 (except only latitude = 0 is acceptable)
         lat = safe_float(row.get('ais_position_latitude'))
         lon = safe_float(row.get('ais_position_longitude'))
-        if lat is not None and lon is not None and lat == 0 and lon == 0:
-            if 'ais_position_latitude' in row:
-                raw_lat = strip_mark(row.get('ais_position_latitude'))
-                if not is_marked(row.get('ais_position_latitude')):
-                    row['ais_position_latitude'] = mark(row['ais_position_latitude'])
-                row_flagged_columns.add('ais_position_latitude')
-                row_reasons['ais_position_latitude'] = 'latitude == 0 AND longitude == 0'
-                flagged_cells += 1
-            if 'ais_position_longitude' in row:
-                raw_lon = strip_mark(row.get('ais_position_longitude'))
-                if not is_marked(row.get('ais_position_longitude')):
-                    row['ais_position_longitude'] = mark(row['ais_position_longitude'])
-                row_flagged_columns.add('ais_position_longitude')
-                row_reasons['ais_position_longitude'] = 'latitude == 0 AND longitude == 0'
-                flagged_cells += 1
+        if lat is not None and lon is not None:
+            # lat==0 and lon==0 -> not acceptable (flag both)
+            if lat == 0 and lon == 0:
+                if 'ais_position_latitude' in row:
+                    if not is_marked(row.get('ais_position_latitude')):
+                        row['ais_position_latitude'] = mark(row['ais_position_latitude'])
+                    row_flagged_columns.add('ais_position_latitude')
+                    row_reasons['ais_position_latitude'] = 'latitude == 0 AND longitude == 0'
+                    flagged_cells += 1
+                if 'ais_position_longitude' in row:
+                    if not is_marked(row.get('ais_position_longitude')):
+                        row['ais_position_longitude'] = mark(row['ais_position_longitude'])
+                    row_flagged_columns.add('ais_position_longitude')
+                    row_reasons['ais_position_longitude'] = 'latitude == 0 AND longitude == 0'
+                    flagged_cells += 1
+            # except only latitude = 0 is acceptable, so lat==0 and lon!=0 is OK
+            # if longitude == 0 but latitude != 0 -> bad
+            elif lon == 0 and lat != 0:
+                if 'ais_position_longitude' in row:
+                    if not is_marked(row.get('ais_position_longitude')):
+                        row['ais_position_longitude'] = mark(row['ais_position_longitude'])
+                    row_flagged_columns.add('ais_position_longitude')
+                    row_reasons['ais_position_longitude'] = 'longitude == 0 with latitude != 0'
+                    flagged_cells += 1
 
         # Update row in place
         for k in original_row:
