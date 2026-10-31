@@ -60,14 +60,15 @@ for year in ('2024', '2025'):
     if pd and os.path.exists(pd):
         POSITION_DIRS.append(pd)
 
-# Additional captain directories (if they exist)
-ADDITIONAL_CAPTAIN_DIRS = [
-    '/home/haha/Downloads/3-2. AIS Data/2024 Data/captain info/2024',
-    '/home/haha/Downloads/3-2. AIS Data/2025 Data/captain info 2025',
-]
-for d in ADDITIONAL_CAPTAIN_DIRS:
-    if os.path.exists(d) and d not in CAPTAIN_DIRS:
-        CAPTAIN_DIRS.append(d)
+# Additional captain directories (if they exist - commented out /home/haha paths
+# that may not exist in all environments; use AIS year directories instead)
+# ADDITIONAL_CAPTAIN_DIRS = [
+#     '/home/haha/Downloads/3-2. AIS Data/2024 Data/captain info/2024',
+#     '/home/haha/Downloads/3-2. AIS Data/2025 Data/captain info 2025',
+# ]
+# for d in ADDITIONAL_CAPTAIN_DIRS:
+#     if os.path.exists(d) and d not in CAPTAIN_DIRS:
+#         CAPTAIN_DIRS.append(d)
 
 # Backwards-compatible single-directory constants (first match)
 CAPTAIN_DIR = CAPTAIN_DIRS[0] if CAPTAIN_DIRS else os.path.join(APP_ROOT, 'AIS 2025', 'captain info')

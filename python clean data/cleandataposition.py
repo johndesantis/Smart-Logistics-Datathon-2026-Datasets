@@ -62,14 +62,15 @@ for year in ('2024', '2025'):
     if pd and os.path.exists(pd):
         POSITION_DIRS.append(pd)
 
-# Additional position directories (if they exist)
-ADDITIONAL_POSITION_DIRS = [
-    '/home/haha/Downloads/3-2. AIS Data/2024 Data/position info/2024',
-    '/home/haha/Downloads/3-2. AIS Data/2025 Data/position info 2025',
-]
-for d in ADDITIONAL_POSITION_DIRS:
-    if os.path.exists(d) and d not in POSITION_DIRS:
-        POSITION_DIRS.append(d)
+# Additional position directories (if they exist - commented out /home/haha paths
+# that may not exist in all environments; use AIS year directories instead)
+# ADDITIONAL_POSITION_DIRS = [
+#     '/home/haha/Downloads/3-2. AIS Data/2024 Data/position info/2024',
+#     '/home/haha/Downloads/3-2. AIS Data/2025 Data/position info 2025',
+# ]
+# for d in ADDITIONAL_POSITION_DIRS:
+#     if os.path.exists(d) and d not in POSITION_DIRS:
+#         POSITION_DIRS.append(d)
 
 # Backwards-compatible single-directory constants (first match)
 POSITION_DIR = POSITION_DIRS[0] if POSITION_DIRS else os.path.join(APP_ROOT, 'AIS 2025', 'position info')
