@@ -17,10 +17,13 @@ Position info acceptable (NOT flagged):
   - speed > 0.5, course > 0 within valid ranges
 
 Data handling:
-  - Supports both AIS 2024 and AIS 2025 directory naming.
+  - Supports AIS 2024 and AIS 2025 directory naming.
+  - Supports /home/haha/Downloads/3-2. AIS Data paths.
   - Skips non-CSV files.
   - Filters out None fieldnames to prevent ValueError.
   - Uses DictWriter with extrasaction='ignore' to preserve file structure.
+  - Reports written in real time as flags are found.
+  - Terminal output uses ANSI colors to highlight flagged columns.
 """
 import csv
 import os
@@ -28,6 +31,12 @@ import glob
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 APP_ROOT = os.path.dirname(SCRIPT_DIR)
+
+# ANSI color codes for terminal output (yellow highlight on flagged cells)
+COLOR_YELLOW = '\033[93m'
+COLOR_RESET = '\033[0m'
+COLOR_BOLD = '\033[1m'
+
 
 # Resolve directories for a given year
 def _resolve_data_dirs(year):
@@ -41,6 +50,7 @@ def _resolve_data_dirs(year):
         return (os.path.join(base, 'captain info'),
                 os.path.join(base, 'position info'))
     return None, None
+
 
 # Collect directories for 2024 and 2025
 CAPTAIN_DIRS = []
@@ -104,35 +114,46 @@ def strip_mark(value):
     return s
 
 
-def clean_position_file(filepath, flagged_report_list, report_writer, report_file):
+def _collect_all_fieldnames(file_paths):
+    """Collect the union of all fieldnames across all files (sorted)."""
+    all_names = set()
+    for fp in file_paths:
+        try:
+            with open(fp, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                if reader.fieldnames:
+                    for fn in reader.fieldnames:
+                        if fn is not None:
+                            all_names.add(fn)
+        except Exception:
+            pass
+    return sorted(all_names)
+
+
+def clean_position_file(filepath, fieldnames, report_writer, report_file):
     """Clean a single position info CSV file in place.
-    
+
     Flagged cells are prefixed with [BAD].
     All original data is preserved; only flagged values are modified.
-    Already-marked cells are recognized and included in the flagged report.
     Reports are written in real time as flags are found.
+    Flagged rows are printed to terminal with ANSI color highlighting.
     """
     with open(filepath, 'r', newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
-        fieldnames = reader.fieldnames
-        if fieldnames is None:
+        file_fieldnames = reader.fieldnames
+        if file_fieldnames is None:
             return 0, 0
-        fieldnames = [fn for fn in fieldnames if fn is not None]
+        file_fieldnames = [fn for fn in file_fieldnames if fn is not None]
         rows = list(reader)
 
     flagged_cells = 0
-    row_flags_map = {}  # row_idx -> {columns: set, original: dict, flagged: dict, reasons: dict}
-    
+
     for row_idx, row in enumerate(rows):
         original_row = dict(row)
         row = {k: v for k, v in row.items() if k is not None}
-        row_flags_map[row_idx] = {
-            'flagged_columns': set(),
-            'original_values': {},
-            'flagged_values': {},
-            'reasons': {},
-        }
-        
+        row_flagged_columns = set()
+        row_reasons = {}
+
         # Rule: latitude outside [-90, 90]
         lat = safe_float(row.get('ais_position_latitude'))
         if lat is not None and (lat < -90 or lat > 90):
@@ -140,19 +161,8 @@ def clean_position_file(filepath, flagged_report_list, report_writer, report_fil
                 raw_lat = strip_mark(row.get('ais_position_latitude'))
                 if not is_marked(row.get('ais_position_latitude')):
                     row['ais_position_latitude'] = mark(row['ais_position_latitude'])
-                row_flags_map[row_idx]['flagged_columns'].add('ais_position_latitude')
-                row_flags_map[row_idx]['original_values']['ais_position_latitude'] = raw_lat
-                row_flags_map[row_idx]['flagged_values']['ais_position_latitude'] = row['ais_position_latitude']
-                row_flags_map[row_idx]['reasons']['ais_position_latitude'] = 'latitude outside [-90, 90]'
-                flagged_report_list.append({
-                    'file': os.path.basename(filepath),
-                    'filepath': filepath,
-                    'row_index': row_idx + 1,
-                    'column': 'ais_position_latitude',
-                    'original_value': raw_lat,
-                    'flagged_value': row['ais_position_latitude'],
-                    'reason': 'latitude outside [-90, 90]'
-                })
+                row_flagged_columns.add('ais_position_latitude')
+                row_reasons['ais_position_latitude'] = 'latitude outside [-90, 90]'
                 flagged_cells += 1
 
         # Rule: longitude outside [-180, 180]
@@ -162,19 +172,8 @@ def clean_position_file(filepath, flagged_report_list, report_writer, report_fil
                 raw_lon = strip_mark(row.get('ais_position_longitude'))
                 if not is_marked(row.get('ais_position_longitude')):
                     row['ais_position_longitude'] = mark(row['ais_position_longitude'])
-                row_flags_map[row_idx]['flagged_columns'].add('ais_position_longitude')
-                row_flags_map[row_idx]['original_values']['ais_position_longitude'] = raw_lon
-                row_flags_map[row_idx]['flagged_values']['ais_position_longitude'] = row['ais_position_longitude']
-                row_flags_map[row_idx]['reasons']['ais_position_longitude'] = 'longitude outside [-180, 180]'
-                flagged_report_list.append({
-                    'file': os.path.basename(filepath),
-                    'filepath': filepath,
-                    'row_index': row_idx + 1,
-                    'column': 'ais_position_longitude',
-                    'original_value': raw_lon,
-                    'flagged_value': row['ais_position_longitude'],
-                    'reason': 'longitude outside [-180, 180]'
-                })
+                row_flagged_columns.add('ais_position_longitude')
+                row_reasons['ais_position_longitude'] = 'longitude outside [-180, 180]'
                 flagged_cells += 1
 
         # Rule: speed < 0 and != -1 (-1 = unknown)
@@ -184,19 +183,8 @@ def clean_position_file(filepath, flagged_report_list, report_writer, report_fil
                 raw_speed = strip_mark(row.get('ais_position_speed'))
                 if not is_marked(row.get('ais_position_speed')):
                     row['ais_position_speed'] = mark(row['ais_position_speed'])
-                row_flags_map[row_idx]['flagged_columns'].add('ais_position_speed')
-                row_flags_map[row_idx]['original_values']['ais_position_speed'] = raw_speed
-                row_flags_map[row_idx]['flagged_values']['ais_position_speed'] = row['ais_position_speed']
-                row_flags_map[row_idx]['reasons']['ais_position_speed'] = 'speed < 0 and != -1'
-                flagged_report_list.append({
-                    'file': os.path.basename(filepath),
-                    'filepath': filepath,
-                    'row_index': row_idx + 1,
-                    'column': 'ais_position_speed',
-                    'original_value': raw_speed,
-                    'flagged_value': row['ais_position_speed'],
-                    'reason': 'speed < 0 and != -1'
-                })
+                row_flagged_columns.add('ais_position_speed')
+                row_reasons['ais_position_speed'] = 'speed < 0 and != -1'
                 flagged_cells += 1
 
         # Rule: course < 0 or course > 360, and != -1 (-1 = unknown)
@@ -206,19 +194,8 @@ def clean_position_file(filepath, flagged_report_list, report_writer, report_fil
                 raw_course = strip_mark(row.get('ais_position_course'))
                 if not is_marked(row.get('ais_position_course')):
                     row['ais_position_course'] = mark(row['ais_position_course'])
-                row_flags_map[row_idx]['flagged_columns'].add('ais_position_course')
-                row_flags_map[row_idx]['original_values']['ais_position_course'] = raw_course
-                row_flags_map[row_idx]['flagged_values']['ais_position_course'] = row['ais_position_course']
-                row_flags_map[row_idx]['reasons']['ais_position_course'] = 'course < 0 or course > 360 and != -1'
-                flagged_report_list.append({
-                    'file': os.path.basename(filepath),
-                    'filepath': filepath,
-                    'row_index': row_idx + 1,
-                    'column': 'ais_position_course',
-                    'original_value': raw_course,
-                    'flagged_value': row['ais_position_course'],
-                    'reason': 'course < 0 or course > 360 and != -1'
-                })
+                row_flagged_columns.add('ais_position_course')
+                row_reasons['ais_position_course'] = 'course < 0 or course > 360 and != -1'
                 flagged_cells += 1
 
         # Rule: latitude == 0 AND longitude == 0 -> flag both
@@ -229,37 +206,15 @@ def clean_position_file(filepath, flagged_report_list, report_writer, report_fil
                 raw_lat = strip_mark(row.get('ais_position_latitude'))
                 if not is_marked(row.get('ais_position_latitude')):
                     row['ais_position_latitude'] = mark(row['ais_position_latitude'])
-                row_flags_map[row_idx]['flagged_columns'].add('ais_position_latitude')
-                row_flags_map[row_idx]['original_values']['ais_position_latitude'] = raw_lat
-                row_flags_map[row_idx]['flagged_values']['ais_position_latitude'] = row['ais_position_latitude']
-                row_flags_map[row_idx]['reasons']['ais_position_latitude'] = 'latitude == 0 AND longitude == 0'
-                flagged_report_list.append({
-                    'file': os.path.basename(filepath),
-                    'filepath': filepath,
-                    'row_index': row_idx + 1,
-                    'column': 'ais_position_latitude',
-                    'original_value': raw_lat,
-                    'flagged_value': row['ais_position_latitude'],
-                    'reason': 'latitude == 0 AND longitude == 0'
-                })
+                row_flagged_columns.add('ais_position_latitude')
+                row_reasons['ais_position_latitude'] = 'latitude == 0 AND longitude == 0'
                 flagged_cells += 1
             if 'ais_position_longitude' in row:
                 raw_lon = strip_mark(row.get('ais_position_longitude'))
                 if not is_marked(row.get('ais_position_longitude')):
                     row['ais_position_longitude'] = mark(row['ais_position_longitude'])
-                row_flags_map[row_idx]['flagged_columns'].add('ais_position_longitude')
-                row_flags_map[row_idx]['original_values']['ais_position_longitude'] = raw_lon
-                row_flags_map[row_idx]['flagged_values']['ais_position_longitude'] = row['ais_position_longitude']
-                row_flags_map[row_idx]['reasons']['ais_position_longitude'] = 'latitude == 0 AND longitude == 0'
-                flagged_report_list.append({
-                    'file': os.path.basename(filepath),
-                    'filepath': filepath,
-                    'row_index': row_idx + 1,
-                    'column': 'ais_position_longitude',
-                    'original_value': raw_lon,
-                    'flagged_value': row['ais_position_longitude'],
-                    'reason': 'latitude == 0 AND longitude == 0'
-                })
+                row_flagged_columns.add('ais_position_longitude')
+                row_reasons['ais_position_longitude'] = 'latitude == 0 AND longitude == 0'
                 flagged_cells += 1
 
         # Update row in place
@@ -269,24 +224,43 @@ def clean_position_file(filepath, flagged_report_list, report_writer, report_fil
             if k in row:
                 original_row[k] = row[k]
         rows[row_idx] = original_row
-        
-        # Write to report in real time if this row has flags
-        if row_idx in row_flags_map and row_flags_map[row_idx]['flagged_columns']:
-            info = row_flags_map[row_idx]
+
+        # Write to report and print to terminal in real time if this row has flags
+        if row_flagged_columns:
+            # --- Terminal output with ANSI colors on flagged columns ---
+            colored_cells = []
+            for col in fieldnames:
+                val = row.get(col, '')
+                if col in row_flagged_columns:
+                    colored_cells.append(
+                        f'{COLOR_YELLOW}[BAD]{strip_mark(val)}{COLOR_RESET}'
+                    )
+                else:
+                    colored_cells.append(str(val))
+
+            print(f'{COLOR_BOLD}[FLAGGED] {os.path.basename(filepath)} row {row_idx + 1}{COLOR_RESET}')
+            print('  ' + ' | '.join(
+                f'{col}={val}' for col, val in zip(fieldnames, colored_cells)
+            ))
+            print(f'  Flagged columns: {", ".join(sorted(row_flagged_columns))}')
+            print(f'  Reasons: {"; ".join(f"{col}={row_reasons[col]}" for col in sorted(row_flagged_columns))}')
+            print()
+
+            # --- CSV report row with all columns ---
             report_writer.writerow([
                 os.path.basename(filepath),
                 filepath,
                 row_idx + 1,
-                len(info['flagged_columns']),
-                ';'.join(sorted(info['flagged_columns'])),
-                ';'.join(f'{col}={info["original_values"][col]}' for col in sorted(info['flagged_columns'])),
-                ';'.join(f'{col}={info["flagged_values"][col]}' for col in sorted(info['flagged_columns'])),
-                ';'.join(f'{col}={info["reasons"][col]}' for col in sorted(info['flagged_columns'])),
+                len(row_flagged_columns),
+                ';'.join(sorted(row_flagged_columns)),
+                ';'.join(f'{col}={row_reasons[col]}' for col in sorted(row_flagged_columns)),
+            ] + [
+                row.get(col, '') for col in fieldnames
             ])
             report_file.flush()
 
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, lineterminator='\n', extrasaction='ignore')
+        writer = csv.DictWriter(f, fieldnames=file_fieldnames, lineterminator='\n', extrasaction='ignore')
         writer.writeheader()
         writer.writerows(rows)
 
@@ -297,34 +271,38 @@ def main():
     total_files = 0
     total_rows = 0
     total_flagged = 0
-    flagged_report_list = []
-
-    # Open report files for real-time writing
-    report_path = os.path.join(APP_ROOT, 'flaggedpositioncells.csv')
-    report_file = open(report_path, 'w', newline='', encoding='utf-8')
-    report_writer = csv.writer(report_file)
-    report_writer.writerow(['file', 'filepath', 'row_index', 'flagged_row_count', 'flagged_columns', 'original_values', 'flagged_values', 'reasons'])
-    report_file.flush()
-    print(f'Writing flagged rows report in real-time to: {report_path}')
 
     # Collect all CSV files from all resolved position directories
     position_files = sorted(
         glob.glob(os.path.join(d, '*.csv')) for d in POSITION_DIRS
     )
-    # Flatten the list of lists
     position_files = [f for sublist in position_files for f in sublist]
+
+    # Collect all unique fieldnames across all files for the report
+    all_fieldnames = _collect_all_fieldnames(position_files)
+
+    # Open report file for real-time writing
+    report_path = os.path.join(APP_ROOT, 'flaggedpositioncells.csv')
+    report_file = open(report_path, 'w', newline='', encoding='utf-8')
+    report_writer = csv.writer(report_file)
+    report_writer.writerow([
+        'file', 'filepath', 'row_index', 'flagged_column_count', 'flagged_columns',
+        'flagged_reasons',
+    ] + all_fieldnames)
+    report_file.flush()
+    print(f'Writing flagged rows report in real-time to: {report_path}')
+    print()
 
     # Position info (skip non-CSV files like 'haha')
     for filepath in position_files:
-        rows, flagged = clean_position_file(filepath, flagged_report_list, report_writer, report_file)
+        rows, flagged = clean_position_file(filepath, all_fieldnames, report_writer, report_file)
         total_files += 1
         total_rows += rows
         total_flagged += flagged
         print(f'[POSITION] {os.path.basename(filepath)}: {rows} rows, {flagged} cells flagged')
 
     print(f'\nTotal: {total_files} files, {total_rows} rows, {total_flagged} cells flagged')
-    
-    # Count rows flagged
+
     row_count = sum(1 for _ in open(report_path))
     report_file.close()
     print(f'\nFlagged rows report completed: {report_path} ({row_count - 1} rows flagged, {total_flagged} total cells flagged)')
