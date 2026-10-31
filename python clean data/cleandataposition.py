@@ -274,10 +274,16 @@ def main():
     total_flagged = 0
 
     # Collect all CSV files from all resolved position directories
-    position_files = sorted(
-        glob.glob(os.path.join(d, '*.csv')) for d in POSITION_DIRS
-    )
-    position_files = [f for sublist in position_files for f in sublist]
+    # Deduplicate by filename to avoid processing same files twice across different year directories
+    position_files = []
+    seen_basenames = set()
+    for d in POSITION_DIRS:
+        for f in sorted(glob.glob(os.path.join(d, '*.csv'))):
+            basename = os.path.basename(f)
+            if basename not in seen_basenames:
+                seen_basenames.add(basename)
+                position_files.append(f)
+    position_files = sorted(position_files)
 
     # Collect all unique fieldnames across all files for the report
     all_fieldnames = _collect_all_fieldnames(position_files)
