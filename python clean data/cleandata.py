@@ -32,8 +32,18 @@ import glob
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 APP_ROOT = os.path.dirname(SCRIPT_DIR)
-CAPTAIN_DIR = os.path.join(APP_ROOT, 'AIS 2025', 'captain info')
-POSITION_DIR = os.path.join(APP_ROOT, 'AIS 2025', 'position info')
+# Try both possible directory names
+if os.path.exists(os.path.join(APP_ROOT, '2025 Data')):
+    DATA_DIR = os.path.join(APP_ROOT, '2025 Data')
+    CAPTAIN_DIR = os.path.join(DATA_DIR, 'captain info')
+    POSITION_DIR = os.path.join(DATA_DIR, 'position info')
+elif os.path.exists(os.path.join(APP_ROOT, 'AIS 2025')):
+    DATA_DIR = os.path.join(APP_ROOT, 'AIS 2025')
+    CAPTAIN_DIR = os.path.join(DATA_DIR, 'captain info')
+    POSITION_DIR = os.path.join(DATA_DIR, 'position info')
+else:
+    CAPTAIN_DIR = os.path.join(APP_ROOT, 'AIS 2025', 'captain info')
+    POSITION_DIR = os.path.join(APP_ROOT, 'AIS 2025', 'position info')
 
 CALLSIGN_NUMERIC_RE = re.compile(r'^[0-9]+$')
 
@@ -60,41 +70,47 @@ def clean_captain_file(filepath):
     with open(filepath, 'r', newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         fieldnames = reader.fieldnames
+        if fieldnames is None:
+            return 0, 0
+        # Filter out None fieldnames
+        fieldnames = [fn for fn in fieldnames if fn is not None]
         rows = list(reader)
 
     flagged_cells = 0
     for row in rows:
+        # Remove None keys if any
+        row = {k: v for k, v in row.items() if k is not None}
         # Rule: length == 0 AND width == 0
         length = safe_float(row.get('ais_capts_length'))
         width = safe_float(row.get('ais_capts_width'))
         if length is not None and width is not None and length == 0 and width == 0:
-            if not is_marked(row['ais_capts_length']):
+            if 'ais_capts_length' in row and not is_marked(row['ais_capts_length']):
                 row['ais_capts_length'] = mark(row['ais_capts_length'])
                 flagged_cells += 1
-            if not is_marked(row['ais_capts_width']):
+            if 'ais_capts_width' in row and not is_marked(row['ais_capts_width']):
                 row['ais_capts_width'] = mark(row['ais_capts_width'])
                 flagged_cells += 1
 
         # Rule: callsign purely numeric
         callsign = row.get('ais_capts_callsign') or ''
-        if callsign and CALLSIGN_NUMERIC_RE.match(callsign) and not is_marked(row['ais_capts_callsign']):
+        if callsign and CALLSIGN_NUMERIC_RE.match(callsign) and not is_marked(row.get('ais_capts_callsign')):
             row['ais_capts_callsign'] = mark(row['ais_capts_callsign'])
             flagged_cells += 1
 
         # Rule: imo == 0
         imo = safe_float(row.get('ais_capts_imo'))
-        if imo is not None and imo == 0 and not is_marked(row['ais_capts_imo']):
+        if imo is not None and imo == 0 and not is_marked(row.get('ais_capts_imo')):
             row['ais_capts_imo'] = mark(row['ais_capts_imo'])
             flagged_cells += 1
 
         # Rule: draft <= 0 -> unacceptable
         draft = safe_float(row.get('ais_capts_draft'))
-        if draft is not None and draft <= 0 and not is_marked(row['ais_capts_draft']):
+        if draft is not None and draft <= 0 and not is_marked(row.get('ais_capts_draft')):
             row['ais_capts_draft'] = mark(row['ais_capts_draft'])
             flagged_cells += 1
 
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, lineterminator='\n')
+        writer = csv.DictWriter(f, fieldnames=fieldnames, lineterminator='\n', extrasaction='ignore')
         writer.writeheader()
         writer.writerows(rows)
 
@@ -104,40 +120,44 @@ def clean_position_file(filepath):
     with open(filepath, 'r', newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         fieldnames = reader.fieldnames
+        if fieldnames is None:
+            return 0, 0
+        fieldnames = [fn for fn in fieldnames if fn is not None]
         rows = list(reader)
 
     flagged_cells = 0
     for row in rows:
+        row = {k: v for k, v in row.items() if k is not None}
         # Rule: latitude outside [-90, 90]
         lat = safe_float(row.get('ais_position_latitude'))
         if lat is not None and (lat < -90 or lat > 90):
-            if not is_marked(row['ais_position_latitude']):
+            if 'ais_position_latitude' in row and not is_marked(row['ais_position_latitude']):
                 row['ais_position_latitude'] = mark(row['ais_position_latitude'])
                 flagged_cells += 1
 
         # Rule: longitude outside [-180, 180]
         lon = safe_float(row.get('ais_position_longitude'))
         if lon is not None and (lon < -180 or lon > 180):
-            if not is_marked(row['ais_position_longitude']):
+            if 'ais_position_longitude' in row and not is_marked(row['ais_position_longitude']):
                 row['ais_position_longitude'] = mark(row['ais_position_longitude'])
                 flagged_cells += 1
 
         # Rule: speed < 0 and != -1 (-1 = unknown)
         speed = safe_float(row.get('ais_position_speed'))
         if speed is not None and speed < 0 and speed != -1:
-            if not is_marked(row['ais_position_speed']):
+            if 'ais_position_speed' in row and not is_marked(row['ais_position_speed']):
                 row['ais_position_speed'] = mark(row['ais_position_speed'])
                 flagged_cells += 1
 
         # Rule: course < 0 or course > 360, and != -1 (-1 = unknown)
         course = safe_float(row.get('ais_position_course'))
         if course is not None and course != -1 and (course < 0 or course > 360):
-            if not is_marked(row['ais_position_course']):
+            if 'ais_position_course' in row and not is_marked(row['ais_position_course']):
                 row['ais_position_course'] = mark(row['ais_position_course'])
                 flagged_cells += 1
 
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, lineterminator='\n')
+        writer = csv.DictWriter(f, fieldnames=fieldnames, lineterminator='\n', extrasaction='ignore')
         writer.writeheader()
         writer.writerows(rows)
 
