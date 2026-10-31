@@ -8,9 +8,9 @@ Captain info rules:
   - ais_capts_length == 0 AND ais_capts_width == 0 -> flag both
   - ais_capts_callsign purely numeric (no letters) -> flag
   - ais_capts_imo == 0 -> flag
+  - ais_capts_draft <= 0 -> flag
 
 Captain info acceptable (NOT flagged):
-  - ais_capts_draft == 0
   - ais_capts_trans_x == 0 AND ais_capts_trans_y == 0
 
 Position info rules:
@@ -85,6 +85,12 @@ def clean_captain_file(filepath):
         imo = safe_float(row.get('ais_capts_imo'))
         if imo is not None and imo == 0 and not is_marked(row['ais_capts_imo']):
             row['ais_capts_imo'] = mark(row['ais_capts_imo'])
+            flagged_cells += 1
+
+        # Rule: draft <= 0 -> unacceptable
+        draft = safe_float(row.get('ais_capts_draft'))
+        if draft is not None and draft <= 0 and not is_marked(row['ais_capts_draft']):
+            row['ais_capts_draft'] = mark(row['ais_capts_draft'])
             flagged_cells += 1
 
     with open(filepath, 'w', newline='', encoding='utf-8') as f:
